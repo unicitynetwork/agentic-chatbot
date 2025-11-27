@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import type { ChatMessage } from '@agentic/shared';
 
 interface Props {
@@ -22,8 +24,13 @@ export function MessageBubble({ message }: Props) {
                     switch (content.type) {
                         case 'text':
                             return (
-                                <div key={idx} className="prose prose-sm max-w-none">
-                                    <ReactMarkdown>{content.text}</ReactMarkdown>
+                                <div key={idx} className="prose prose-sm max-w-none prose-table:border-collapse prose-table:w-full prose-th:border prose-th:border-gray-300 prose-th:bg-gray-50 prose-th:px-4 prose-th:py-2 prose-th:text-left prose-td:border prose-td:border-gray-300 prose-td:px-4 prose-td:py-2">
+                                    <ReactMarkdown
+                                        remarkPlugins={[remarkGfm]}
+                                        rehypePlugins={[rehypeRaw]}
+                                    >
+                                        {content.text}
+                                    </ReactMarkdown>
                                 </div>
                             );
                         case 'thinking':
@@ -35,8 +42,13 @@ export function MessageBubble({ message }: Props) {
                                     >
                                         💭 Thinking process {showThinking ? '▼' : '▶'}
                                     </summary>
-                                    <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200 text-xs text-gray-700">
-                                        <ReactMarkdown>{content.text}</ReactMarkdown>
+                                    <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200 text-xs text-gray-700 prose prose-sm max-w-none">
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            rehypePlugins={[rehypeRaw]}
+                                        >
+                                            {content.text}
+                                        </ReactMarkdown>
                                     </div>
                                 </details>
                             );
