@@ -15,6 +15,21 @@ export interface TriviaServerState {
     scores: Map<string, number>;
 }
 
+/**
+ * Shuffles an array using the Fisher-Yates algorithm.
+ * Returns a new shuffled array (does not mutate original).
+ */
+export const shuffleArray = <T>(array: T[], random: () => number): T[] => {
+  const newArray = [...array];
+
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+
+  return newArray;
+};
+
 export function createTriviaServer(options: TriviaServerOptions = {}): { server: McpServer; state: TriviaServerState } {
     const random = options.random ?? Math.random;
     const questions = options.questions ?? defaultQuestions;
@@ -63,12 +78,7 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
             const question = filtered[Math.floor(random() * filtered.length)];
             state.currentQuestions.set(userId, question);
 
-            // Shuffle answers using Fisher-Yates with injected random
-            const allAnswers = [question.correctAnswer, ...question.incorrectAnswers];
-            for (let i = allAnswers.length - 1; i > 0; i--) {
-                const j = Math.floor(random() * (i + 1));
-                [allAnswers[i], allAnswers[j]] = [allAnswers[j], allAnswers[i]];
-            }
+            const allAnswers = shuffleArray([question.correctAnswer, ...question.incorrectAnswers], random);
 
             return {
                 content: [{
