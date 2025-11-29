@@ -5,9 +5,12 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { questions as defaultQuestions, categories, type TriviaQuestion } from './data/questions.js';
 
+export const DEFAULT_WINNING_STREAK = 10;
+
 export interface TriviaServerOptions {
     random?: () => number;
     questions?: TriviaQuestion[];
+    winningStreak?: number;
 }
 
 export interface ActiveQuestion {
@@ -54,6 +57,7 @@ function resolveAnswerFromInput(input: string, options: string[]): string {
 export function createTriviaServer(options: TriviaServerOptions = {}): { server: McpServer; state: TriviaServerState } {
     const random = options.random ?? Math.random;
     const questions = options.questions ?? defaultQuestions;
+    const winningStreak = options.winningStreak ?? DEFAULT_WINNING_STREAK;
 
     const server = new McpServer({
         name: 'trivia',
@@ -137,9 +141,20 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
 
             const isCorrect = answerText.toLowerCase() === question.correctAnswer.toLowerCase();
 
+            let newScore: number;
+            let award = false;
+
             if (isCorrect) {
-                const currentScore = state.scores.get(userId) || 0;
-                state.scores.set(userId, currentScore + 1);
+                newScore = (state.scores.get(userId) || 0) + 1;
+                if (newScore >= winningStreak) {
+                    award = true;
+                    state.scores.set(userId, 0); // Reset after award
+                } else {
+                    state.scores.set(userId, newScore);
+                }
+            } else {
+                newScore = 0;
+                state.scores.set(userId, 0);
             }
 
             state.currentQuestions.delete(userId);
@@ -153,7 +168,8 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
                         explanation: isCorrect
                             ? 'Great job!'
                             : `The correct answer was: ${question.correctAnswer}`,
-                        newScore: state.scores.get(userId) || 0,
+                        newScore,
+                        ...(award && { award: true }),
                     }),
                 }],
             };

@@ -48,10 +48,11 @@ interface TestContext {
     state: TriviaServerState;
 }
 
-async function setupTest(options: { random?: () => number; questions?: TriviaQuestion[] } = {}): Promise<TestContext> {
+async function setupTest(options: { random?: () => number; questions?: TriviaQuestion[]; winningStreak?: number } = {}): Promise<TestContext> {
     const { server, state } = createTriviaServer({
         random: options.random ?? createSeededRandom(42),
         questions: options.questions ?? TEST_QUESTIONS,
+        winningStreak: options.winningStreak,
     });
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -272,12 +273,8 @@ describe('MCP Trivia Server', () => {
             expect(state.currentQuestions.get('anonymous')).toBeUndefined();
         });
 
-        it('increments score only for correct answers', async () => {
+        it('increments streak for correct answers', async () => {
             const { client, state } = await setupTest();
-
-            state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
-            await client.callTool({ name: 'check_answer', arguments: { answer: 'Wrong' } });
-            expect(state.scores.get('anonymous') ?? 0).toBe(0);
 
             state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
             await client.callTool({ name: 'check_answer', arguments: { answer: 'Four' } });
@@ -286,6 +283,73 @@ describe('MCP Trivia Server', () => {
             state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[1]));
             await client.callTool({ name: 'check_answer', arguments: { answer: 'Blue' } });
             expect(state.scores.get('anonymous')).toBe(2);
+        });
+
+        it('resets streak to zero on wrong answer', async () => {
+            const { client, state } = await setupTest();
+
+            // Build up a streak
+            state.scores.set('anonymous', 5);
+            state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
+
+            const result = await client.callTool({
+                name: 'check_answer',
+                arguments: { answer: 'Wrong' },
+            });
+            const data = parseToolResult(result) as { correct: boolean; newScore: number };
+
+            expect(data.correct).toBe(false);
+            expect(data.newScore).toBe(0);
+            expect(state.scores.get('anonymous')).toBe(0);
+        });
+
+        it('awards when reaching winning streak', async () => {
+            const { client, state } = await setupTest({ winningStreak: 3 });
+
+            state.scores.set('anonymous', 2); // One away from winning
+            state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
+
+            const result = await client.callTool({
+                name: 'check_answer',
+                arguments: { answer: 'Four' },
+            });
+            const data = parseToolResult(result) as { correct: boolean; newScore: number; award?: boolean };
+
+            expect(data.correct).toBe(true);
+            expect(data.award).toBe(true);
+            expect(data.newScore).toBe(3); // Shows winning streak in response
+        });
+
+        it('resets internal score after award', async () => {
+            const { client, state } = await setupTest({ winningStreak: 2 });
+
+            state.scores.set('anonymous', 1);
+            state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
+
+            const result = await client.callTool({ name: 'check_answer', arguments: { answer: 'Four' } });
+            const data = parseToolResult(result) as { correct: boolean; newScore: number; award?: boolean };
+            expect(data.award).toBe(true);
+            expect(data.newScore).toBe(2);
+            expect(state.scores.get('anonymous')).toBe(0);
+
+            // Verify via get_score
+            const scoreResult = await client.callTool({ name: 'get_score', arguments: {} });
+            expect((parseToolResult(scoreResult) as { score: number }).score).toBe(0);
+        });
+
+        it('does not include award field when below winning streak', async () => {
+            const { client, state } = await setupTest({ winningStreak: 10 });
+
+            state.currentQuestions.set('anonymous', createActiveQuestion(TEST_QUESTIONS[0]));
+
+            const result = await client.callTool({
+                name: 'check_answer',
+                arguments: { answer: 'Four' },
+            });
+            const data = parseToolResult(result) as { correct: boolean; award?: boolean };
+
+            expect(data.correct).toBe(true);
+            expect(data.award).toBeUndefined();
         });
     });
 
@@ -299,7 +363,7 @@ describe('MCP Trivia Server', () => {
             expect(data.score).toBe(0);
         });
 
-        it('returns accumulated score', async () => {
+        it('returns current streak', async () => {
             const { client, state } = await setupTest();
             state.scores.set('anonymous', 5);
 
