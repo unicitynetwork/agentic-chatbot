@@ -4,6 +4,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { questions as defaultQuestions, categories, type TriviaQuestion } from './data/questions.js';
+import { loadConfig, type Config } from './config.js';
+import { IdentityService } from './identity-service.js';
+import { NostrService } from './nostr-service.js';
+import { PaymentTracker } from './payment-tracker.js';
 
 export const DEFAULT_WINNING_STREAK = 10;
 
@@ -11,6 +15,10 @@ export interface TriviaServerOptions {
     random?: () => number;
     questions?: TriviaQuestion[];
     winningStreak?: number;
+    // Payment services (optional for testing)
+    nostrService?: NostrService;
+    paymentTracker?: PaymentTracker;
+    config?: Config;
 }
 
 export interface ActiveQuestion {
@@ -22,6 +30,12 @@ export interface TriviaServerState {
     currentQuestions: Map<string, ActiveQuestion>;
     scores: Map<string, number>;
 }
+
+// Pending payment waiters (for confirm_payment)
+const pendingWaiters = new Map<string, {
+    unicityId: string;
+    waitForPayment: () => Promise<boolean>;
+}>();
 
 /**
  * Shuffles an array using the Fisher-Yates algorithm.
@@ -58,6 +72,12 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
     const random = options.random ?? Math.random;
     const questions = options.questions ?? defaultQuestions;
     const winningStreak = options.winningStreak ?? DEFAULT_WINNING_STREAK;
+    const nostrService = options.nostrService;
+    const paymentTracker = options.paymentTracker;
+    const config = options.config;
+
+    // Check if payment is enabled
+    const paymentEnabled = !!(nostrService && paymentTracker && config);
 
     const server = new McpServer({
         name: 'trivia',
@@ -69,6 +89,35 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
         scores: new Map(),
     };
 
+    // Tool: Check access (day pass status)
+    server.tool(
+        'check_access',
+        'Check if user has valid day pass for trivia',
+        {
+            unicity_id: z.string().describe("User's Unicity ID (nametag)"),
+        },
+        async ({ unicity_id }) => {
+            if (!paymentEnabled || !paymentTracker) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ hasAccess: true, message: 'Payment not required' }) }],
+                };
+            }
+
+            const hasPass = paymentTracker.hasValidPass(unicity_id);
+            const pass = paymentTracker.getPass(unicity_id);
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        hasAccess: hasPass,
+                        expiresAt: pass ? new Date(pass.expiresAt).toISOString() : null,
+                    }),
+                }],
+            };
+        }
+    );
+
     // Tool: Get categories
     server.tool(
         'get_categories',
@@ -79,16 +128,76 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
         })
     );
 
-    // Tool: Get a question
+    // Tool: Get a question (with payment check when enabled)
     server.tool(
         'get_question',
         'Get a random trivia question, optionally filtered by category',
         {
-            category: z.string().optional().describe('Category to filter by')
+            unicity_id: z.string().optional().describe("User's Unicity ID (required when payment is enabled)"),
+            category: z.string().optional().describe('Category to filter by'),
         },
-        async ({ category }, extra) => {
-            const userId = (extra as any)?.meta?.userId || 'anonymous';
+        async ({ unicity_id, category }, extra) => {
+            // Determine user ID
+            const userId = unicity_id || (extra as any)?.meta?.userId || 'anonymous';
 
+            // Check payment if enabled
+            if (paymentEnabled && paymentTracker && nostrService && config) {
+                if (!unicity_id) {
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify({ error: 'unicity_id is required for paid trivia' }) }],
+                    };
+                }
+
+                if (!paymentTracker.hasValidPass(unicity_id)) {
+                    // Need to pay - send payment request
+                    try {
+                        const userPubkey = await nostrService.resolvePubkey(unicity_id);
+                        if (!userPubkey) {
+                            return {
+                                content: [{
+                                    type: 'text',
+                                    text: JSON.stringify({
+                                        error: 'Could not resolve Unicity ID',
+                                        message: `No pubkey found for @${unicity_id}`,
+                                    }),
+                                }],
+                            };
+                        }
+
+                        const { eventId, waitForPayment } = await nostrService.sendPaymentRequest(
+                            unicity_id,
+                            userPubkey
+                        );
+
+                        // Store waiter for confirm_payment
+                        pendingWaiters.set(eventId, { unicityId: unicity_id, waitForPayment });
+
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: JSON.stringify({
+                                    status: 'payment_required',
+                                    message: 'Day pass required. Please approve the payment in your Unicity wallet.',
+                                    eventId,
+                                    timeoutSeconds: Math.floor(config.paymentTimeoutMs / 1000),
+                                }),
+                            }],
+                        };
+                    } catch (error) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: JSON.stringify({
+                                    error: 'Failed to initiate payment',
+                                    message: error instanceof Error ? error.message : String(error),
+                                }),
+                            }],
+                        };
+                    }
+                }
+            }
+
+            // User has access (or payment not enabled) - return question
             let filtered = questions;
             if (category) {
                 filtered = filtered.filter(q => q.category.toLowerCase() === category.toLowerCase());
@@ -118,15 +227,73 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
         }
     );
 
+    // Tool: Confirm payment (wait for payment and grant day pass)
+    server.tool(
+        'confirm_payment',
+        'Wait for payment confirmation and grant day pass',
+        {
+            event_id: z.string().describe('Payment request event ID'),
+        },
+        async ({ event_id }) => {
+            if (!paymentEnabled || !paymentTracker) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ error: 'Payment not enabled on this server' }) }],
+                };
+            }
+
+            const waiter = pendingWaiters.get(event_id);
+            if (!waiter) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({ error: 'No pending payment found for this event ID' }),
+                    }],
+                };
+            }
+
+            console.log(`[Trivia] Waiting for payment confirmation: ${event_id}`);
+
+            const paymentReceived = await waiter.waitForPayment();
+            pendingWaiters.delete(event_id);
+
+            if (!paymentReceived) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'timeout',
+                            message: 'Payment not received in time. Please try again.',
+                        }),
+                    }],
+                };
+            }
+
+            // Grant day pass
+            const pass = paymentTracker.grantDayPass(waiter.unicityId);
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        message: 'Payment received! Your day pass is now active.',
+                        expiresAt: new Date(pass.expiresAt).toISOString(),
+                    }),
+                }],
+            };
+        }
+    );
+
     // Tool: Check answer
     server.tool(
         'check_answer',
         'Check if the provided answer is correct for the current question',
         {
+            unicity_id: z.string().optional().describe("User's Unicity ID"),
             answer: z.string().describe('The user\'s answer (text or letter a/b/c/d)'),
         },
-        async ({ answer }, extra) => {
-            const userId = (extra as any)?.meta?.userId || 'anonymous';
+        async ({ unicity_id, answer }, extra) => {
+            const userId = unicity_id || (extra as any)?.meta?.userId || 'anonymous';
             const activeQuestion = state.currentQuestions.get(userId);
 
             if (!activeQuestion) {
@@ -148,6 +315,8 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
                 newScore = (state.scores.get(userId) || 0) + 1;
                 if (newScore >= winningStreak) {
                     award = true;
+                    // TODO: Actually send NFT to userId here (see PLAN_NFT_SENDING.md)
+                    console.log(`[Trivia] User ${userId} earned an award! Sending NFT...`);
                     state.scores.set(userId, 0); // Reset after award
                 } else {
                     state.scores.set(userId, newScore);
@@ -180,9 +349,11 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
     server.tool(
         'get_score',
         'Get the current score for the user',
-        {},
-        async (_, extra) => {
-            const userId = (extra as any)?.meta?.userId || 'anonymous';
+        {
+            unicity_id: z.string().optional().describe("User's Unicity ID"),
+        },
+        async ({ unicity_id }, extra) => {
+            const userId = unicity_id || (extra as any)?.meta?.userId || 'anonymous';
             return {
                 content: [{
                     type: 'text',
@@ -197,9 +368,50 @@ export function createTriviaServer(options: TriviaServerOptions = {}): { server:
 
 // Start server with HTTP transport
 async function main() {
-    const port = parseInt(process.env.PORT || '3001');
+    let config: Config;
+    let identityService: IdentityService | null = null;
+    let nostrService: NostrService | null = null;
+    let paymentTracker: PaymentTracker | null = null;
 
-    const { server } = createTriviaServer();
+    // Try to load payment config
+    try {
+        config = loadConfig();
+
+        console.log('[Trivia] Payment configuration loaded');
+        console.log(`[Trivia] Nametag: @${config.nametag}`);
+
+        // Initialize payment services
+        identityService = new IdentityService(config);
+        await identityService.initialize();
+
+        nostrService = new NostrService(config, identityService);
+        await nostrService.connect();
+
+        paymentTracker = new PaymentTracker(config.dayPassHours);
+
+        console.log('[Trivia] Payment services initialized');
+    } catch (error) {
+        console.log('[Trivia] Payment not configured, running in free mode');
+        console.log(`[Trivia] Reason: ${error instanceof Error ? error.message : String(error)}`);
+
+        // Create minimal config for non-payment mode
+        config = {
+            port: parseInt(process.env.PORT || '3001', 10),
+            winningStreak: parseInt(process.env.WINNING_STREAK || '10', 10),
+        } as Config;
+    }
+
+    const port = config.port || parseInt(process.env.PORT || '3001', 10);
+    const winningStreak = config.winningStreak || DEFAULT_WINNING_STREAK;
+
+    console.log(`[Trivia] Winning streak set to: ${winningStreak}`);
+
+    const { server } = createTriviaServer({
+        winningStreak,
+        nostrService: nostrService || undefined,
+        paymentTracker: paymentTracker || undefined,
+        config: nostrService ? config : undefined,
+    });
 
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),

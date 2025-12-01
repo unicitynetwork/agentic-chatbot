@@ -25,6 +25,21 @@ services:
       - "3001:3001"
     environment:
       PORT: 3001
+      WINNING_STREAK: ${WINNING_STREAK:-10}
+      # Payment configuration (optional - server runs in free mode without these)
+      AGGREGATOR_URL: ${AGGREGATOR_URL:-}
+      NOSTR_RELAY_URL: ${NOSTR_RELAY_URL:-}
+      TRIVIA_PRIVATE_KEY: ${TRIVIA_PRIVATE_KEY:-}
+      TRIVIA_NAMETAG: ${TRIVIA_NAMETAG:-}
+      PAYMENT_COIN_ID: ${PAYMENT_COIN_ID:-}
+      PAYMENT_AMOUNT: ${PAYMENT_AMOUNT:-1000000000}
+      DAY_PASS_HOURS: ${DAY_PASS_HOURS:-24}
+      PAYMENT_TIMEOUT_SECONDS: ${PAYMENT_TIMEOUT_SECONDS:-120}
+      DATA_DIR: /app/data
+      TRUST_BASE_PATH: /app/trust-base.json
+    volumes:
+      - ./trust-base.json:/app/trust-base.json:ro
+      - trivia-data:/app/data
 
   mcp-web:
     build:
@@ -69,3 +84,4 @@ services:
 
 volumes:
   postgres_data:
+  trivia-data:
