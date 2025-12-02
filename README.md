@@ -2,20 +2,6 @@
 
 A modular, agentic chatbot platform built with React, Node.js, and the Model Context Protocol (MCP). Features multiple AI-powered "activities" (personalities/agents) that can use custom tools via MCP servers.
 
-## Table of Contents
-
-- [Architecture Overview](#architecture-overview)
-- [Quick Start](#quick-start)
-- [Project Structure](#project-structure)
-- [Adding New Activities](#adding-new-activities)
-- [Activity System Prompt Templating](#activity-system-prompt-templating)
-- [Adding Trivia Questions](#adding-trivia-questions)
-- [Creating MCP Servers](#creating-mcp-servers)
-- [Environment Configuration](#environment-configuration)
-- [Deployment](#deployment)
-- [Development](#development)
-- [Troubleshooting](#troubleshooting)
-
 ## Architecture Overview
 
 ### High-Level Architecture
@@ -407,10 +393,10 @@ User's timezone unknown - using UTC.
 // packages/agent-server/src/config/activities/my-activity.ts
 export const myActivity: ActivityConfig = {
     id: 'my-activity',
-    name: 'Personal Assistant',
+    name: 'Assistant',
     description: 'A timezone and locale-aware assistant',
 
-    systemPrompt: `You are a helpful personal assistant.
+    systemPrompt: `You are a helpful assistant.
 
 USER CONTEXT:
 - User ID: {{userId}}
@@ -422,13 +408,8 @@ USER CONTEXT:
 {{/if}}
 
 Your role:
-- Be aware of the user's timezone when discussing time
-- Adapt your language formality based on their locale
-- Remember the user across sessions using their userId
-- Use the memory tool to store user preferences
-
-Available tools:
-- memory: Store and retrieve user-specific information
+- Be nice
+...
 `,
 
     llm: {
@@ -445,147 +426,14 @@ Available tools:
         name: 'my-activity',
     },
 
-    persistChatHistory: true,
+    persistChatHistory: false,
 };
 ```
 
-### How Template Processing Works
-
-1. **Frontend Capture**: The UI automatically detects user's timezone and locale using browser APIs:
-   ```typescript
-   {
-       userId: 'user_abc12345',
-       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-       locale: navigator.language
-   }
-   ```
-
-2. **Request Transmission**: userContext is sent with each chat message
-
-3. **Server Processing**: The agent-server processes templates before sending to LLM:
-   ```typescript
-   // Build context from available data
-   const templateContext = {
-       userId: 'user_abc12345',
-       serverTime: '2025-12-02T14:30:00.123Z',
-       userTimezone: 'Europe/Tallinn',
-       userLocale: 'et-EE',
-       userLanguage: 'et',
-       userRegion: 'EE',
-       localTime: '12/02/2025, 16:30:00'
-   };
-
-   // Process template tags
-   const processedPrompt = processTemplate(systemPrompt, templateContext);
-   ```
-
-4. **LLM Receives**: Final system prompt with all values substituted
-
-### Template Implementation Details
-
-- **Location**: Template processor in `/packages/agent-server/src/agent/llm/prompt-templates.ts`
-- **Integration**: Applied in `/packages/agent-server/src/agent/loop.ts` before LLM call
-- **Backward Compatible**: Activities without template tags work unchanged
-- **Graceful Fallback**: Missing variables keep original syntax (e.g., `{{userCountry}}`)
-
-### Debugging Templates
-
-Enable template debugging to see raw and processed prompts:
-
-```bash
-# Set environment variable
-export DEBUG_PROMPTS=true
-
-# Restart agent-server
-docker-compose restart agent-server
-
-# Check logs
-docker-compose logs -f agent-server
-```
-
-Debug output includes:
-```
-[Template] Raw system prompt: You are Viktor...{{userId}}...
-[Template] Context: {
-  userId: 'user_abc123',
-  serverTime: '2025-12-02T14:30:00.000Z',
-  userTimezone: 'Europe/Tallinn',
-  ...
-}
-[Template] Processed system prompt: You are Viktor...user_abc123...
-```
-
-### Best Practices
-
-1. **Use Conditionals for Optional Data**: Wrap optional variables like `{{userCountry}}` in `{{#if}}` blocks
-2. **Include userId**: Helps LLM understand user continuity and memory tool usage
-3. **Time Awareness**: Use `{{localTime}}` when discussing schedules or time-sensitive topics
-4. **Language Adaptation**: Use `{{userLanguage}}` to adjust formality or idioms
-5. **Document in System Prompt**: Mention what user context is available
-6. **Test Without Variables**: Ensure prompts work even if userContext fails to populate
-
-### Security Considerations
-
-- **No PII Exposure**: userId is a random identifier, not personal information
-- **IP Privacy**: userIp not shown to LLM by default (available via template if needed)
-- **Country Detection**: Requires Cloudflare deployment or custom IP-to-country service
-- **Client-Side Trust**: Timezone/locale come from browser, can be spoofed (not security critical)
 
 ## Adding Trivia Questions
 
 The trivia questions are stored in `packages/mcp-trivia/src/data/questions.ts`.
-
-### Question Format
-
-```typescript
-export interface TriviaQuestion {
-    id: string;              // Unique identifier
-    category: string;        // One of: Science, History, Geography, Entertainment, Sports
-    question: string;        // The question text
-    correctAnswer: string;   // The correct answer
-    incorrectAnswers: string[];  // Array of 3 wrong answers
-}
-```
-
-### Adding New Questions
-
-1. Open `packages/mcp-trivia/src/data/questions.ts`
-
-2. Add your questions to the `questions` array:
-
-```typescript
-export const questions: TriviaQuestion[] = [
-    // ... existing questions ...
-    {
-        id: '256',  // Use next available ID
-        category: 'Science',
-        question: 'What is the speed of light in a vacuum?',
-        correctAnswer: '299,792,458 m/s',
-        incorrectAnswers: ['300,000,000 m/s', '186,000 m/s', '3 × 10^8 km/s'],
-    },
-    // Add more...
-];
-```
-
-3. Add new categories if needed:
-
-```typescript
-export const categories = [
-    'Science',
-    'History',
-    'Geography',
-    'Entertainment',
-    'Sports',
-    'Technology',  // New category
-];
-```
-
-4. Rebuild the MCP server:
-
-```bash
-docker-compose build mcp-trivia
-docker-compose up -d mcp-trivia
-```
 
 ## Creating MCP Servers
 
@@ -888,241 +736,21 @@ docker-compose logs -f
 docker-compose exec agent-server pnpm db:migrate
 ```
 
-### HTTPS Setup with Nginx
+#### 8. Monitoring and Logging 📊
 
-```nginx
-# /etc/nginx/sites-available/agentic-chatbot
-server {
-    listen 80;
-    server_name yourdomain.com;
-    return 301 https://$server_name$request_uri;
-}
+**Production monitoring essentials**:
+- Set up log aggregation (ELK stack, Loki, CloudWatch)
+- Monitor error rates and latency
+- Set up alerts for suspicious activity
+- Track API usage and costs
+- Monitor database performance
 
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com;
+**Sensitive data in logs**:
+- Never log API keys or passwords
+- Redact user PII before logging
+- Rotate logs regularly
+- Secure log storage
 
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-    # Frontend
-    location / {
-        proxy_pass http://localhost:5173;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # API
-    location /chat {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
-    }
-
-    location /activities {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-    }
-}
-```
-
-Update your .env:
-```env
-VITE_API_URL=https://yourdomain.com
-CORS_ORIGIN=https://yourdomain.com
-```
-
-Rebuild UI:
-```bash
-docker-compose build ui
-docker-compose up -d
-```
-
-## Development
-
-### Monorepo Structure
-
-This is a pnpm workspace monorepo. All packages share dependencies via the workspace root.
-
-### Running Individual Services
-
-```bash
-# Install dependencies (run from root)
-pnpm install
-
-# Run specific package
-pnpm --filter @agentic/agent-server dev
-pnpm --filter @agentic/ui dev
-pnpm --filter @agentic/mcp-trivia dev
-
-# Build specific package
-pnpm --filter @agentic/agent-server build
-```
-
-### Database Migrations
-
-**Create migration**:
-```bash
-cd packages/agent-server
-pnpm db:generate  # After schema changes
-```
-
-**Run migrations**:
-```bash
-cd packages/agent-server
-pnpm db:migrate
-```
-
-**Push schema** (dev only):
-```bash
-cd packages/agent-server
-pnpm db:push
-```
-
-### Debugging
-
-The agent-server supports detailed debug logging for development and troubleshooting.
-
-#### DEBUG_PROMPTS
-
-Logs system prompt processing and template variable substitution.
-
-**Enable**:
-```bash
-# In .env or docker-compose.yml
-DEBUG_PROMPTS=true
-```
-
-**Output includes**:
-- Raw system prompt (with template tags like `{{userId}}`)
-- Template context (all available variables)
-- Processed system prompt (with values substituted)
-- Final enhanced system prompt sent to LLM
-- Complete message array
-
-**Example output**:
-```
-[Template] Raw system prompt: You are Viktor...User ID: {{userId}}...
-[Template] Context: {
-  userId: 'user_abc123',
-  serverTime: '2025-12-02T14:30:00.000Z',
-  userTimezone: 'Europe/Tallinn',
-  userLocale: 'et-EE',
-  userLanguage: 'et',
-  userRegion: 'EE',
-  localTime: '12/02/2025, 16:30:00'
-}
-[Template] Processed system prompt: You are Viktor...User ID: user_abc123...
-
-FINAL SYSTEM PROMPT:
-[Full prompt with all enhancements]
-```
-
-**Use case**: Debug activity template tags, verify user context is being captured
-
-#### DEBUG_MCP
-
-Logs all MCP tool discovery, calls, and responses.
-
-**Enable**:
-```bash
-# In .env or docker-compose.yml
-DEBUG_MCP=true
-```
-
-**Output includes**:
-- Tool discovery (list of tools from each MCP server)
-- Tool schemas (input parameters and descriptions)
-- Tool call arguments
-- Metadata passed to tools (userId, userIp, userCountry)
-- Full tool response content
-- Error flags
-
-**Example output**:
-```
-[MCP] Loading 3 tools from web
-[MCP Debug] Tools from web:
-[MCP Debug]   1. web_search
-[MCP Debug]      Description: Search the web using DuckDuckGo
-[MCP Debug]      Input Schema: {
-  "type": "object",
-  "properties": {
-    "query": { "type": "string", "description": "Search query" },
-    "max_results": { "type": "number", "description": "Max results" }
-  }
-}
-
-[MCP Debug] Calling tool: web_search
-[MCP Debug]   Arguments: {
-  "query": "latest AI news",
-  "max_results": 5
-}
-[MCP Debug]   Metadata: {
-  "userId": "user_abc123",
-  "userIp": "192.168.1.1",
-  "userCountry": "EE"
-}
-
-[MCP Debug] Response from web_search:
-[MCP Debug]   Content: [
-  {
-    "type": "text",
-    "text": "{\"results\": [...]}"
-  }
-]
-```
-
-**Use case**: Debug MCP tool integrations, verify tools are being called correctly, inspect tool responses
-
-#### Enabling Both Flags
-
-For comprehensive debugging:
-
-```bash
-# In .env
-DEBUG_PROMPTS=true
-DEBUG_MCP=true
-
-# Restart agent-server
-docker-compose restart agent-server
-
-# Watch logs with filtering
-docker-compose logs -f agent-server | grep -E '\[MCP|Template\]'
-```
-
-#### Production Warning
-
-⚠️ **Never enable debug flags in production**:
-- Logs may contain sensitive user data
-- Performance impact from verbose logging
-- Large log files can fill disk space
-
-### Code Style
-
-- TypeScript strict mode enabled
-- ESM modules (`.js` imports even for `.ts` files)
-- Use shared types from `@agentic/shared`
-- Follow existing patterns for consistency
-
-### Adding Dependencies
-
-```bash
-# Add to specific package
-pnpm --filter @agentic/agent-server add express
-
-# Add to workspace root
-pnpm add -w typescript
-
-# Add dev dependency
-pnpm --filter @agentic/ui add -D vite
-```
 
 ## Troubleshooting
 
@@ -1225,7 +853,7 @@ import { generateUUID } from '../utils/uuid';
 **Error**: "Rate limit exceeded"
 
 **Solution**:
-- Use a less frequent model (e.g., gemini-2.5-flash instead of pro)
+- Use a lighter model (e.g., gemini-2.5-flash instead of pro)
 - Implement request throttling
 - Upgrade API tier
 
@@ -1235,4 +863,3 @@ import { generateUUID } from '../utils/uuid';
 - [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs)
 - [Hono Documentation](https://hono.dev/)
 - [Drizzle ORM Documentation](https://orm.drizzle.team/)
-
