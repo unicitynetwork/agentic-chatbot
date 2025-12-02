@@ -31,6 +31,11 @@ export const ChatRequestSchema = z.object({
     activityId: z.string(),
     userId: z.string(),
     messages: z.array(ChatMessageSchema),
+    userContext: z.object({
+        userId: z.string(),
+        timezone: z.string().optional(),
+        locale: z.string().optional(),
+    }).optional(),
 });
 
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;

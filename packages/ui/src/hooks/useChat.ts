@@ -18,6 +18,19 @@ export function useChat() {
         getCurrentMessages,
     } = useChatStore();
 
+    const getUserContext = useCallback((userId: string) => {
+        try {
+            return {
+                userId,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                locale: navigator.language,
+            };
+        } catch (e) {
+            console.warn('Could not detect user context:', e);
+            return { userId };
+        }
+    }, []);
+
     const sendMessage = useCallback(async (text: string) => {
         if (!currentActivityId || isStreaming) return;
 
@@ -51,6 +64,7 @@ export function useChat() {
                     activityId: currentActivityId,
                     userId,
                     messages: [...messages, userMessage],
+                    userContext: getUserContext(userId),
                 }),
             });
 

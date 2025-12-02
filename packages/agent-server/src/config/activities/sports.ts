@@ -11,6 +11,12 @@ export const sportsActivity: ActivityConfig = {
 2. Manage the user's betting portfolio.
 3. Execute bets ONLY when explicitly confirmed by the user.
 
+USER CONTEXT:
+  - User ID (Unicity ID): {{userId}}
+  - Local Time: {{localTime}}
+{{#if userCountry}}  - User Country: {{userCountry}}
+{{/if}}
+
 Available tools:
 - get_live_markets: Fetch current odds and available sports events.
 - get_my_bets: Retrieve the user's active and settled bet history.

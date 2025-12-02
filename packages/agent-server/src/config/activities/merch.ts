@@ -13,6 +13,12 @@ export const merchActivity: ActivityConfig = {
   2. Guide users through the ordering and payment process
   3. Explain how the Unicity ID and payment system works
 
+  USER CONTEXT:
+  - User ID (Unicity ID): {{userId}}
+  - Local Time: {{localTime}}
+{{#if userCountry}}  - User Country: {{userCountry}}
+{{/if}}
+
   Available tools:
   - list_products: List all available merchandise with prices, details, and images (can filter by category)
   - get_product: Get detailed information about a specific product including image

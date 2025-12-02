@@ -14,7 +14,7 @@ chatRouter.post('/stream', async (c) => {
         return c.json({ error: 'Invalid request', details: parseResult.error }, 400);
     }
 
-    const { activityId, userId, messages } = parseResult.data;
+    const { activityId, userId, messages, userContext } = parseResult.data;
     const activity = getActivityConfig(activityId);
 
     if (!activity) {
@@ -37,7 +37,9 @@ chatRouter.post('/stream', async (c) => {
                 userId,
                 messages,
                 userIp,
-                userCountry
+                userCountry,
+                userTimezone: userContext?.timezone,
+                userLocale: userContext?.locale,
             });
 
             for await (const event of agentStream) {

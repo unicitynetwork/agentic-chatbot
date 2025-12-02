@@ -11,6 +11,12 @@ import type { ActivityConfig } from '@agentic/shared';
   2. Guide users through the payment process for day passes
   3. Explain how the Unicity ID and payment system works
 
+  USER CONTEXT:
+  - User ID (user_nametag): {{userId}}
+  - Local Time: {{localTime}}
+{{#if userCountry}}  - User Country: {{userCountry}}
+{{/if}}
+
   Available tools:
   - list_games: List all available games
   - check_access: Check if a user has an active day pass

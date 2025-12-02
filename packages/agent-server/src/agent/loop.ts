@@ -1,5 +1,6 @@
 import { streamText, type CoreMessage } from 'ai';
 import { createLLMProvider } from './llm/providers.js';
+import { processTemplate, buildTemplateContext } from './llm/prompt-templates.js';
 import { createMemoryTool, type ToolContext } from './tools/memory.js';
 import { globalMcpManager } from './mcp/manager.js';
 import type { ActivityConfig, ChatMessage } from '@agentic/shared';
@@ -10,6 +11,8 @@ export interface AgentContext {
     messages: ChatMessage[];
     userIp?: string;
     userCountry?: string;
+    userTimezone?: string;
+    userLocale?: string;
 }
 
 function getUserFriendlyError(error: unknown): string {
@@ -99,7 +102,7 @@ function convertToCoreMessages(messages: ChatMessage[]): CoreMessage[] {
 }
 
 export async function* runAgentStream(ctx: AgentContext) {
-    const { activity, userId, messages, userIp, userCountry } = ctx;
+    const { activity, userId, messages, userIp, userCountry, userTimezone, userLocale } = ctx;
 
     try {
         console.log('[Agent] Starting agent stream for activity:', activity.id);
@@ -131,8 +134,20 @@ export async function* runAgentStream(ctx: AgentContext) {
         const coreMessages = convertToCoreMessages(messages);
         console.log('[Agent] Processing', coreMessages.length, 'messages');
 
-        // Enhanced system prompt with XML delimiters for clarity
-        const enhancedSystemPrompt = `${activity.systemPrompt}
+        // Build template context from available user data
+        const templateContext = buildTemplateContext(
+            userId,
+            userIp,
+            userCountry,
+            userTimezone,
+            userLocale
+        );
+
+        // Process template tags in system prompt
+        const processedSystemPrompt = processTemplate(activity.systemPrompt, templateContext);
+
+        // Add standard message handling instructions
+        const enhancedSystemPrompt = `${processedSystemPrompt}
 
 IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
 - The conversation history is provided in the messages array
@@ -142,7 +157,10 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
 
         // Debug logging - log the full prompt structure
         if (process.env.DEBUG_PROMPTS === 'true') {
-            console.log('SYSTEM PROMPT:');
+            console.log('[Template] Raw system prompt:', activity.systemPrompt);
+            console.log('[Template] Context:', templateContext);
+            console.log('[Template] Processed system prompt:', processedSystemPrompt);
+            console.log('\nFINAL SYSTEM PROMPT:');
             console.log(enhancedSystemPrompt);
             console.log('\nMESSAGES ARRAY:');
             coreMessages.forEach((msg, idx) => {

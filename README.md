@@ -8,6 +8,7 @@ A modular, agentic chatbot platform built with React, Node.js, and the Model Con
 - [Quick Start](#quick-start)
 - [Project Structure](#project-structure)
 - [Adding New Activities](#adding-new-activities)
+- [Activity System Prompt Templating](#activity-system-prompt-templating)
 - [Adding Trivia Questions](#adding-trivia-questions)
 - [Creating MCP Servers](#creating-mcp-servers)
 - [Environment Configuration](#environment-configuration)
@@ -348,6 +349,187 @@ llm: {
     temperature: 0.7,
 }
 ```
+
+## Activity System Prompt Templating
+
+Activities support dynamic template tags in system prompts to inject user context at runtime. This enables personalization based on user ID, timezone, locale, and other metadata.
+
+### Available Template Variables
+
+| Variable | Example | Description | Source |
+|----------|---------|-------------|--------|
+| `{{userId}}` | `user_abc12345` | Unique user identifier | Request body (localStorage) |
+| `{{serverTime}}` | `2025-12-02T14:30:00.123Z` | Current server time in UTC ISO format | Server |
+| `{{userIp}}` | `192.168.1.1` | User's IP address (for geolocation) | HTTP headers (x-forwarded-for) |
+| `{{userCountry}}` | `EE` | User's country code | HTTP headers (cf-ipcountry - Cloudflare only) |
+| `{{userTimezone}}` | `Europe/Tallinn` | User's timezone | Frontend Intl API |
+| `{{userLocale}}` | `et-EE` | User's locale/language setting | Frontend navigator.language |
+| `{{userLanguage}}` | `et` | Language code (parsed from locale) | Derived from userLocale |
+| `{{userRegion}}` | `EE` | Region code (parsed from locale) | Derived from userLocale |
+| `{{localTime}}` | `12/02/2025, 16:30:00` | Current time in user's timezone | Server time + userTimezone |
+
+### Template Syntax
+
+**Simple Variables**:
+```typescript
+systemPrompt: `You are a helpful assistant.
+
+User ID: {{userId}}
+Current Time: {{serverTime}}
+`
+```
+
+**Conditional Blocks** (only show if variable exists):
+```typescript
+systemPrompt: `You are a helpful assistant.
+
+{{#if userCountry}}User is from {{userCountry}}.
+{{/if}}
+`
+```
+
+**If-Else Blocks**:
+```typescript
+systemPrompt: `You are a helpful assistant.
+
+{{#if userTimezone}}
+User's timezone: {{userTimezone}}
+Local time: {{localTime}}
+{{else}}
+User's timezone unknown - using UTC.
+{{/if}}
+`
+```
+
+### Example: Personalized Activity
+
+```typescript
+// packages/agent-server/src/config/activities/my-activity.ts
+export const myActivity: ActivityConfig = {
+    id: 'my-activity',
+    name: 'Personal Assistant',
+    description: 'A timezone and locale-aware assistant',
+
+    systemPrompt: `You are a helpful personal assistant.
+
+USER CONTEXT:
+- User ID: {{userId}}
+- Current Time (UTC): {{serverTime}}
+{{#if userTimezone}}- User Timezone: {{userTimezone}}
+- Local Time: {{localTime}}
+{{/if}}{{#if userCountry}}- User Country: {{userCountry}}
+{{/if}}{{#if userLocale}}- User Locale: {{userLocale}} (Language: {{userLanguage}})
+{{/if}}
+
+Your role:
+- Be aware of the user's timezone when discussing time
+- Adapt your language formality based on their locale
+- Remember the user across sessions using their userId
+- Use the memory tool to store user preferences
+
+Available tools:
+- memory: Store and retrieve user-specific information
+`,
+
+    llm: {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        temperature: 0.7,
+    },
+
+    mcpServers: [],
+    localTools: ['memory'],
+
+    theme: {
+        primaryColor: '#8b5cf6',
+        name: 'my-activity',
+    },
+
+    persistChatHistory: true,
+};
+```
+
+### How Template Processing Works
+
+1. **Frontend Capture**: The UI automatically detects user's timezone and locale using browser APIs:
+   ```typescript
+   {
+       userId: 'user_abc12345',
+       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+       locale: navigator.language
+   }
+   ```
+
+2. **Request Transmission**: userContext is sent with each chat message
+
+3. **Server Processing**: The agent-server processes templates before sending to LLM:
+   ```typescript
+   // Build context from available data
+   const templateContext = {
+       userId: 'user_abc12345',
+       serverTime: '2025-12-02T14:30:00.123Z',
+       userTimezone: 'Europe/Tallinn',
+       userLocale: 'et-EE',
+       userLanguage: 'et',
+       userRegion: 'EE',
+       localTime: '12/02/2025, 16:30:00'
+   };
+
+   // Process template tags
+   const processedPrompt = processTemplate(systemPrompt, templateContext);
+   ```
+
+4. **LLM Receives**: Final system prompt with all values substituted
+
+### Template Implementation Details
+
+- **Location**: Template processor in `/packages/agent-server/src/agent/llm/prompt-templates.ts`
+- **Integration**: Applied in `/packages/agent-server/src/agent/loop.ts` before LLM call
+- **Backward Compatible**: Activities without template tags work unchanged
+- **Graceful Fallback**: Missing variables keep original syntax (e.g., `{{userCountry}}`)
+
+### Debugging Templates
+
+Enable template debugging to see raw and processed prompts:
+
+```bash
+# Set environment variable
+export DEBUG_PROMPTS=true
+
+# Restart agent-server
+docker-compose restart agent-server
+
+# Check logs
+docker-compose logs -f agent-server
+```
+
+Debug output includes:
+```
+[Template] Raw system prompt: You are Viktor...{{userId}}...
+[Template] Context: {
+  userId: 'user_abc123',
+  serverTime: '2025-12-02T14:30:00.000Z',
+  userTimezone: 'Europe/Tallinn',
+  ...
+}
+[Template] Processed system prompt: You are Viktor...user_abc123...
+```
+
+### Best Practices
+
+1. **Use Conditionals for Optional Data**: Wrap optional variables like `{{userCountry}}` in `{{#if}}` blocks
+2. **Include userId**: Helps LLM understand user continuity and memory tool usage
+3. **Time Awareness**: Use `{{localTime}}` when discussing schedules or time-sensitive topics
+4. **Language Adaptation**: Use `{{userLanguage}}` to adjust formality or idioms
+5. **Document in System Prompt**: Mention what user context is available
+6. **Test Without Variables**: Ensure prompts work even if userContext fails to populate
+
+### Security Considerations
+
+- **No PII Exposure**: userId is a random identifier, not personal information
+- **IP Privacy**: userIp not shown to LLM by default (available via template if needed)
+- **Country Detection**: Requires Cloudflare deployment or custom IP-to-country service
+- **Client-Side Trust**: Timezone/locale come from browser, can be spoofed (not security critical)
 
 ## Adding Trivia Questions
 
