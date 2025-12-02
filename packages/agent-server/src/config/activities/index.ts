@@ -12,7 +12,7 @@ const activities: Record<string, ActivityConfig> = {
     sports: sportsActivity,
     gaming: gamingActivity,
     merch: merchActivity,
-    'otc-madness': otcActivity,
+    p2p: otcActivity,
 };
 
 export function getActivityConfig(id: string): ActivityConfig | undefined {

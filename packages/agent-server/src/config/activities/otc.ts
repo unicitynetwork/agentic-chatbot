@@ -1,7 +1,7 @@
 import type { ActivityConfig } from '@agentic/shared';
 
 export const otcActivity: ActivityConfig = {
-    id: 'otc-madness',
+    id: 'p2p',
     name: 'OTC Madness',
     description: 'Over-the-counter crypto trading matchmaking service',
     greetingMessage: "Welcome to OTC Madness! I'll help you navigate the world of over-the-counter crypto trading. Ready to post an offer or browse available deals?",
