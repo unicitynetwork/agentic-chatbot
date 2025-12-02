@@ -4,6 +4,7 @@ import { amaActivity } from './ama.js';
 import { sportsActivity } from './sports.js';
 import { gamingActivity } from './games.js';
 import { merchActivity } from './merch.js';
+import { otcActivity } from './otc.js';
 
 const activities: Record<string, ActivityConfig> = {
     trivia: triviaActivity,
@@ -11,6 +12,7 @@ const activities: Record<string, ActivityConfig> = {
     sports: sportsActivity,
     gaming: gamingActivity,
     merch: merchActivity,
+    'otc-madness': otcActivity,
 };
 
 export function getActivityConfig(id: string): ActivityConfig | undefined {
