@@ -46,6 +46,24 @@ async def json_fetch_tool(input: JsonFetchInput) -> dict:
 
         print(f"[JSONFetch] Status: {response.status_code}, Time: {response_time:.2f}ms")
 
+        # Check for HTTP errors - return immediately without processing body
+        if response.status_code >= 400:
+            error_message = response.reason
+            # Check for error message in common headers
+            if 'X-Error-Message' in response.headers:
+                error_message = response.headers['X-Error-Message']
+            elif 'X-Error' in response.headers:
+                error_message = response.headers['X-Error']
+
+            print(f"[JSONFetch] HTTP Error {response.status_code}: {error_message}")
+            return {
+                "error": f"HTTP {response.status_code}: {error_message}",
+                "status_code": response.status_code,
+                "url": str(input.url),
+                "message": f"The API returned an error. Status: {response.status_code} {error_message}",
+                "response_time": round(response_time, 2)
+            }
+
         # Try to parse as JSON
         try:
             data = response.json()
