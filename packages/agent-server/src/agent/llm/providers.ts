@@ -1,8 +1,9 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LLMConfig } from '@agentic/shared';
+import { createLoggingFetch } from './fetch-interceptor.js';
 
-export function createLLMProvider(config: LLMConfig) {
+export function createLLMProvider(config: LLMConfig, context?: { requestId?: string }) {
     console.log('[Provider] Creating LLM provider:', config.provider, 'model:', config.model);
 
     switch (config.provider) {
@@ -25,6 +26,7 @@ export function createLLMProvider(config: LLMConfig) {
                 console.log('[Provider] Initializing Gemini with model:', config.model);
                 const google = createGoogleGenerativeAI({
                     apiKey: process.env.GOOGLE_API_KEY,
+                    fetch: context ? createLoggingFetch(context) : undefined,
                 });
                 const model = google(config.model);
                 console.log('[Provider] Gemini provider created successfully');
@@ -56,6 +58,7 @@ export function createLLMProvider(config: LLMConfig) {
                     baseURL: config.baseUrl,
                     apiKey: config.apiKey || 'not-needed',
                     name: 'custom-llm',
+                    fetch: context ? createLoggingFetch(context) : undefined,
                 });
                 const model = provider(config.model);
                 console.log('[Provider] OpenAI-compatible provider created successfully');

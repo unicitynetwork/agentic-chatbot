@@ -14,6 +14,7 @@ export interface AgentContext {
     userTimezone?: string;
     userLocale?: string;
     memoryState?: Record<string, any>; // Initial memory state from client
+    requestId?: string; // Correlation ID for logging
 }
 
 function getUserFriendlyError(error: unknown): string {
@@ -153,7 +154,7 @@ export async function* runAgentStream(ctx: AgentContext) {
         let model;
         try {
             console.log('[Agent] Initializing LLM provider...');
-            model = createLLMProvider(activity.llm);
+            model = createLLMProvider(activity.llm, { requestId: ctx.requestId });
             console.log('[Agent] LLM provider created successfully');
         } catch (error) {
             console.error('[Agent] Failed to create LLM provider:', error);
@@ -176,20 +177,42 @@ export async function* runAgentStream(ctx: AgentContext) {
 
         // Connect to MCP servers (reuses existing connections)
         let mcpTools = {};
-        try {
-            console.log('[Agent] Connecting to MCP servers:', activity.mcpServers.map(s => s.name));
-            await globalMcpManager.connect(activity.mcpServers);
 
-            // Get tools only from servers configured for this activity
-            // Pass user metadata (IP, country) for geolocation-based features
-            const allowedServerNames = activity.mcpServers.map(s => s.name);
-            mcpTools = await globalMcpManager.getTools(allowedServerNames, { userId, userIp, userCountry });
-            console.log('[Agent] MCP tools loaded:', Object.keys(mcpTools));
-        } catch (error) {
-            console.error('[Agent] Failed to load MCP tools:', error);
-            console.error('[Agent] This may cause the agent to fail if tools are required');
-            // Don't throw - allow agent to continue without MCP tools if needed
-            // But log prominently so we know this happened
+        // Only connect if MCP servers are configured
+        if (activity.mcpServers.length > 0) {
+            try {
+                console.log('[Agent] Connecting to MCP servers:', activity.mcpServers.map(s => s.name));
+                await globalMcpManager.connect(activity.mcpServers);
+
+                // Get tools only from servers configured for this activity
+                // Pass user metadata (IP, country) for geolocation-based features
+                const allowedServerNames = activity.mcpServers.map(s => s.name);
+                mcpTools = await globalMcpManager.getTools(allowedServerNames, { userId, userIp, userCountry });
+                console.log('[Agent] MCP tools loaded:', Object.keys(mcpTools));
+            } catch (error) {
+                console.error('[Agent] ❌ CRITICAL: Failed to connect to MCP servers');
+                console.error('[Agent] MCP Error:', error);
+                if (error instanceof Error && error.stack) {
+                    console.error('[Agent] MCP Stack trace:', error.stack);
+                }
+                console.error('[Agent] Request ID:', ctx.requestId);
+
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                const serverNames = activity.mcpServers.map(s => s.name).join(', ');
+                const requestIdSuffix = ctx.requestId ? ` Request ID: ${ctx.requestId}` : '';
+
+                console.error('[Agent] Terminating agent due to MCP connection failure');
+
+                // Return error as italic text and stop
+                yield {
+                    type: 'text-delta',
+                    text: `\n\n_Failed to connect to required tools: ${serverNames}. Error: ${errorMsg}.${requestIdSuffix}_\n\n`
+                };
+                yield { type: 'done' };
+                return; // Stop execution
+            }
+        } else {
+            console.log('[Agent] No MCP servers configured for this activity');
         }
 
         console.log('[Agent] All tools for activity', activity.id + ':', Object.keys({ ...localTools, ...mcpTools }));
@@ -271,7 +294,7 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
             messages: coreMessages,
             tools: allTools,
             maxSteps: 10, // Allow up to 10 tool calls
-            onStepFinish: ({ toolCalls, toolResults, text, finishReason }) => {
+            onStepFinish: ({ toolCalls, toolResults, text, finishReason, response }) => {
                 // Log tool usage for debugging
                 if (toolCalls?.length) {
                     console.log('[Agent] Tool calls:', toolCalls.map((t: any) => t.toolName));
@@ -288,6 +311,22 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
                     });
                 }
                 console.log('[Agent] Step finished. Current text length:', text.length, 'Finish reason:', finishReason || 'none');
+
+                // Log response metadata for troubleshooting
+                if (response) {
+                    console.log('[Agent] Response metadata:', {
+                        id: response.id,
+                        modelId: response.modelId,
+                        timestamp: response.timestamp ? new Date(response.timestamp).toISOString() : undefined,
+                    });
+                }
+
+                // Warn if step produced no text and finished
+                if (text.length === 0 && finishReason) {
+                    console.warn(`[Agent] ⚠️  Step finished with ZERO text! Finish reason: ${finishReason}`);
+                    console.warn('[Agent] This may indicate content filtering, safety blocks, or API issues');
+                    console.warn('[Agent] Request ID:', ctx.requestId);
+                }
             },
         });
 
@@ -311,35 +350,43 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
                     yield { type: 'reasoning', text: part.textDelta };
                 } else if (part.type === 'error') {
                     console.error('[Agent] Stream error:', part.error);
-                    // Send user-friendly error message with root cause
-                    const errorMsg = getUserFriendlyError(part.error);
-                    const rootCause = part.error instanceof Error ? part.error.message : String(part.error);
-                    yield { type: 'text-delta', text: `\n\n${errorMsg}\n\n_Root cause: ${rootCause}_\n\n` };
+                    const errorMsg = part.error instanceof Error ? part.error.message : String(part.error);
+                    const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
+
+                    // Return detailed error as italic text
+                    yield {
+                        type: 'text-delta',
+                        text: `\n\n_Error: ${errorMsg}${requestIdSuffix}_\n\n`
+                    };
                 } else if (part.type === 'finish') {
                     console.log('[Agent] Stream finished. Finish reason:', part.finishReason);
                     console.log('[Agent] Total text generated:', totalTextLength, 'characters');
                     console.log('[Agent] Had content:', hasContent);
 
+                    // Log additional finish metadata for troubleshooting
+                    console.log('[Agent] Finish metadata:', {
+                        finishReason: part.finishReason,
+                        usage: part.usage,
+                        experimental_providerMetadata: part.experimental_providerMetadata,
+                    });
+
                     // CRITICAL: Log if we got no content
                     if (!hasContent || totalTextLength === 0) {
                         console.warn('[Agent] ⚠️  WARNING: LLM returned zero text content!');
                         console.warn('[Agent] Finish reason:', part.finishReason);
-                        console.warn('[Agent] This indicates a potential issue with:');
-                        console.warn('[Agent]   - System prompt formatting');
-                        console.warn('[Agent]   - LLM API issues');
-                        console.warn('[Agent]   - Safety filters');
-                        console.warn('[Agent]   - Tool loading failures');
+                        console.warn('[Agent] Request ID:', ctx.requestId);
+                        console.warn('[Agent] This indicates issues with system prompt, API, safety filters, or tools');
+                        console.warn('[Agent] Check HTTP logs above for status codes and response headers');
 
-                        // If we finished without content and it wasn't a tool call (which might be valid intermediate state),
-                        // send an error to the user.
-                        // Note: streamText handles tool calls internally, so 'finish' here usually means the FINAL response.
-                        // However, if the last step was a tool call that didn't generate text, that might be okay?
-                        // Actually streamText 'finish' event is for the whole generation.
+                        // Log the FULL finish part for deep debugging
+                        console.warn('[Agent] Complete finish event:', JSON.stringify(part, null, 2));
 
-                        if (part.finishReason !== 'stop' && part.finishReason !== 'length') {
-                            // If it's not a normal stop, it might be an error or filter
-                            yield { type: 'text-delta', text: `\n\n_The AI response was empty or filtered. (Reason: ${part.finishReason})_\n` };
-                        }
+                        // Surface empty response with technical details
+                        const requestIdSuffix = ctx.requestId ? ` Request ID: ${ctx.requestId}` : '';
+                        yield {
+                            type: 'text-delta',
+                            text: `\n\n_The AI model returned no content. Finish reason: ${part.finishReason}.${requestIdSuffix}_\n\n`
+                        };
                     }
 
                     if (reasoningText) {
@@ -352,9 +399,12 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
             }
         } catch (streamError) {
             console.error('[Agent] Error in stream:', streamError);
-            const errorMsg = getUserFriendlyError(streamError);
-            const rootCause = streamError instanceof Error ? streamError.message : String(streamError);
-            yield { type: 'text-delta', text: `\n\n${errorMsg}\n\n_Root cause: ${rootCause}_\n\n` };
+            if (streamError instanceof Error && streamError.stack) {
+                console.error('[Agent] Stack trace:', streamError.stack);
+            }
+            const errorMsg = streamError instanceof Error ? streamError.message : String(streamError);
+            const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
+            yield { type: 'text-delta', text: `\n\n_Stream error: ${errorMsg}${requestIdSuffix}_\n\n` };
         }
 
         console.log('[Agent] Stream complete. Total characters:', charCount);
@@ -377,9 +427,12 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
         yield { type: 'done' };
     } catch (error) {
         console.error('[Agent] Error in runAgentStream:', error);
-        const errorMsg = getUserFriendlyError(error);
-        const rootCause = error instanceof Error ? error.message : String(error);
-        yield { type: 'text-delta', text: `\n\n${errorMsg}\n\n_Root cause: ${rootCause}_\n\n` };
+        if (error instanceof Error && error.stack) {
+            console.error('[Agent] Stack trace:', error.stack);
+        }
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
+        yield { type: 'text-delta', text: `\n\n_Error: ${errorMsg}${requestIdSuffix}_\n\n` };
         yield { type: 'done' };
     }
 }

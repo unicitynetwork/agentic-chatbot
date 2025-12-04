@@ -52,6 +52,7 @@ chatRouter.post('/stream', async (c) => {
                 userTimezone: userContext?.timezone,
                 userLocale: userContext?.locale,
                 memoryState, // Pass memory state from client to agent
+                requestId, // Pass correlation ID for logging
             });
 
             let eventCount = 0;
