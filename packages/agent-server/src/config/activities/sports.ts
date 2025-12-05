@@ -12,10 +12,8 @@ export const sportsActivity: ActivityConfig = {
 3. Execute bets ONLY when explicitly confirmed by the user.
 
 USER CONTEXT:
-  - unicity_id: {{userId}}
+  - Unicity ID: {{userId}} (use it as the parameter 'unicity_id')
   - Server Time: {{serverTime}}
-{{#if userCountry}}  - User Country: {{userCountry}}
-{{/if}}
 {{#if formattedMemory}}{{formattedMemory}}
 {{/if}}
 
@@ -41,7 +39,6 @@ Tool Usage Pattern:
     llm: {
         provider: 'gemini',
         model: 'gemini-2.5-flash-preview-09-2025',
-        // Lower temperature for betting to ensure precision with numbers and logic
         temperature: 0.6,
     },
 
@@ -49,23 +46,8 @@ Tool Usage Pattern:
         {
             name: 'bookie-agent',
             url: 'https://market.rooklift.eu:8443',
-            /*
-               NOTE: The server uses a self-signed certificate.
-               Ensure the runtime environment accepts unauthorized certificates.
-               In Node.js, this typically requires setting the environment variable:
-               NODE_TLS_REJECT_UNAUTHORIZED=0
-            */
         },
     ],
 
     localTools: ['memory'],
-
-    theme: {
-        primaryColor: '#10b981', // Emerald Green (Money/Field color)
-        name: 'sports',
-    },
-
-    // Persist history so the agent remembers the odds explicitly discussed
-    // in the previous turn before placing the bet.
-    persistChatHistory: false,
 };
