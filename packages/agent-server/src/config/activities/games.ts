@@ -19,12 +19,6 @@ import type { ActivityConfig } from '@agentic/shared';
   {{#if formattedMemory}}{{formattedMemory}}
   {{/if}}
 
-  Available tools:
-  - list_games: List all available games
-  - check_access: Check if a user has an active day pass
-  - get_game: Request access to a specific game. If the user doesn't have an active pass, this will send a payment request and wait for payment confirmation before returning the game URL.
-  - get_wallet_balance: Check MCP wallet balance (admin only)
-
   Important guidelines:
   - Users need a unicity_id to access games - it must be provided by user context
   - A day pass costs tokens and lasts 24 hours, granting access to ALL games
@@ -48,9 +42,4 @@ import type { ActivityConfig } from '@agentic/shared';
       ],
 
       localTools: ['memory'],
-
-      theme: {
-          primaryColor: '#10b981', // Emerald green
-          name: 'gaming',
-      },
   };
