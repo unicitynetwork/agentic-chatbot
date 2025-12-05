@@ -5,6 +5,10 @@ import { createMemoryTool, formatMemoryForPrompt, type ToolContext } from './too
 import { globalMcpManager } from './mcp/manager.js';
 import type { ActivityConfig, ChatMessage } from '@agentic/shared';
 
+// Configuration for tool retry behavior
+const ENABLE_TOOL_RETRY = process.env.ENABLE_TOOL_RETRY !== 'false'; // Default: enabled
+const MAX_TOOL_RETRIES = parseInt(process.env.MAX_TOOL_RETRIES || '2', 10);
+
 export interface AgentContext {
     activity: ActivityConfig;
     userId: string;
@@ -306,6 +310,9 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
             });
         }
 
+        // Track tool call history to prevent infinite loops (if enabled)
+        const toolCallHistory: Array<{ toolName: string; args: string }> = [];
+
         // Run the agent loop with streaming
         const result = streamText({
             model,
@@ -317,16 +324,49 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
                 // Log tool usage for debugging
                 if (toolCalls?.length) {
                     console.log('[Agent] Tool calls:', toolCalls.map((t: any) => t.toolName));
+
+                    // Check for duplicate tool calls (hallucination guard) - only if retry is enabled
+                    if (ENABLE_TOOL_RETRY) {
+                        for (const tc of toolCalls as any[]) {
+                            // Count how many times we've seen this exact call
+                            const previousCalls = toolCallHistory.filter(h =>
+                                h.toolName === tc.toolName && h.args === JSON.stringify(tc.args)
+                            );
+
+                            if (previousCalls.length >= MAX_TOOL_RETRIES) {
+                                console.warn(`[Agent] ⚠️  HALLUCINATION DETECTED: Tool ${tc.toolName} called ${previousCalls.length + 1} times with identical arguments`);
+                                console.warn(`[Agent] Arguments:`, JSON.stringify(tc.args, null, 2));
+                                console.warn(`[Agent] The LLM is repeating itself - maxSteps limit will stop this`);
+                            }
+
+                            // Record this call
+                            toolCallHistory.push({
+                                toolName: tc.toolName,
+                                args: JSON.stringify(tc.args)
+                            });
+                        }
+                    }
+
                     if (process.env.DEBUG_PROMPTS === 'true') {
                         toolCalls.forEach((tc: any) => {
                             console.log(`  Tool: ${tc.toolName}, Args:`, JSON.stringify(tc.args, null, 2));
                         });
                     }
                 }
-                if (toolResults?.length && process.env.DEBUG_PROMPTS === 'true') {
-                    console.log('[Agent] Tool results:');
+
+                // Log tool results to see if errors are being returned
+                if (toolResults?.length) {
                     toolResults.forEach((tr: any) => {
-                        console.log(`  Tool: ${tr.toolName}, Result:`, JSON.stringify(tr.result, null, 2).substring(0, 500));
+                        const resultStr = JSON.stringify(tr.result, null, 2);
+
+                        if (process.env.DEBUG_PROMPTS === 'true') {
+                            console.log(`[Agent] Tool ${tr.toolName} result:`, resultStr.substring(0, 500));
+                        }
+
+                        // Check if result contains an error message
+                        if (resultStr.includes('Error executing tool') || resultStr.includes('Tool execution failed') || resultStr.includes('Error:')) {
+                            console.log(`[Agent] ℹ️  Tool ${tr.toolName} returned error - LLM will see this and may retry`);
+                        }
                     });
                 }
                 console.log('[Agent] Step finished. Current text length:', text.length, 'Finish reason:', finishReason || 'none');

@@ -1,10 +1,9 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LLMConfig } from '@agentic/shared';
-import { createLoggingFetch } from './fetch-interceptor.js';
+// import { createLoggingFetch } from './fetch-interceptor.js';
 
 export function createLLMProvider(config: LLMConfig, context?: { requestId?: string }) {
-    console.log('[Provider] Creating LLM provider:', config.provider, 'model:', config.model);
 
     switch (config.provider) {
         case 'gemini': {
@@ -26,10 +25,10 @@ export function createLLMProvider(config: LLMConfig, context?: { requestId?: str
                 console.log('[Provider] Initializing Gemini with model:', config.model);
                 const google = createGoogleGenerativeAI({
                     apiKey: process.env.GOOGLE_API_KEY,
-                    fetch: context ? createLoggingFetch(context) : undefined,
+                    // enable for debugging raw responses from llm
+                    // fetch: context ? createLoggingFetch(context) : undefined,
                 });
                 const model = google(config.model);
-                console.log('[Provider] Gemini provider created successfully');
                 return model;
             } catch (error) {
                 console.error('[Provider] Failed to create Gemini provider:', error);
@@ -58,10 +57,9 @@ export function createLLMProvider(config: LLMConfig, context?: { requestId?: str
                     baseURL: config.baseUrl,
                     apiKey: config.apiKey || 'not-needed',
                     name: 'custom-llm',
-                    fetch: context ? createLoggingFetch(context) : undefined,
+                    // fetch: context ? createLoggingFetch(context) : undefined,
                 });
                 const model = provider(config.model);
-                console.log('[Provider] OpenAI-compatible provider created successfully');
                 return model;
             } catch (error) {
                 console.error('[Provider] Failed to create OpenAI-compatible provider:', error);

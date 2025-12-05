@@ -16,6 +16,36 @@ interface ToolContext {
     userCountry?: string;
 }
 
+// Helper function to create instructive error messages for the LLM
+function createInstructiveError(toolName: string, error: string): string {
+    // Parse common error patterns and give helpful advice
+
+    // Missing required argument
+    if (error.includes('required') || error.includes('missing')) {
+        return `Error: Missing required argument for tool '${toolName}'.\n\n` +
+               `Error details: ${error}\n\n` +
+               `Please check the tool schema and provide all required arguments.`;
+    }
+
+    // Type mismatch
+    if (error.includes('type') || error.includes('expected')) {
+        return `Error: Invalid argument type for tool '${toolName}'.\n\n` +
+               `Error details: ${error}\n\n` +
+               `Please check the expected types in the tool schema and convert your arguments accordingly.`;
+    }
+
+    // Validation error
+    if (error.includes('validation') || error.includes('invalid')) {
+        return `Error: Argument validation failed for tool '${toolName}'.\n\n` +
+               `Error details: ${error}\n\n` +
+               `Please review the argument constraints and provide valid values.`;
+    }
+
+    // Generic error
+    return `Error executing tool '${toolName}': ${error}\n\n` +
+           `Please review the error and try again with corrected arguments.`;
+}
+
 export class McpManager {
     private connections: Map<string, ConnectedMcp> = new Map();
     private connecting: Map<string, Promise<void>> = new Map();
@@ -136,7 +166,17 @@ export class McpManager {
                                     ? result.content.map(c => (c as any).text || c).join('\n')
                                     : JSON.stringify(result.content);
 
-                                throw new Error(`MCP tool ${mcpTool.name} failed: ${errorMsg}`);
+                                console.log(`[MCP] Returning error to LLM so it can retry with corrected arguments`);
+
+                                // Use helper to create instructive error message
+                                const instructiveMsg = createInstructiveError(mcpTool.name, errorMsg);
+
+                                // Return error as content instead of throwing
+                                // This allows LLM to see the error and retry
+                                return [{
+                                    type: 'text',
+                                    text: instructiveMsg
+                                }];
                             }
 
                             console.log(`[MCP] Tool ${mcpTool.name} completed successfully`);
@@ -172,17 +212,31 @@ export class McpManager {
 
                             if (payloadSize > MAX_PAYLOAD_SIZE) {
                                 console.error(`[MCP] Tool ${mcpTool.name} returned too much data: ${payloadSize} bytes (limit: ${MAX_PAYLOAD_SIZE})`);
-                                throw new Error(
-                                    `_MCP tool_ '${mcpTool.name}' _returned too much data (${Math.round(payloadSize / 1024)}kb). ` +
-                                    `Limit is 50kb. Please refine your query or ask the tool to return less data._`
-                                );
+                                console.log(`[MCP] Returning payload size error to LLM so it can refine query`);
+
+                                // Return error instead of throwing so LLM can retry with refined query
+                                return [{
+                                    type: 'text',
+                                    text: `Error: Tool '${mcpTool.name}' returned too much data (${Math.round(payloadSize / 1024)}kb). ` +
+                                          `Limit is 50kb. Please refine your query to request less data or be more specific.`
+                                }];
                             }
 
                             return processedContent;
                         } catch (error) {
+                            // Network errors, connection failures, etc.
                             console.error(`[MCP] Exception during tool execution: ${mcpTool.name}`);
                             console.error(`[MCP] Error:`, error);
-                            throw error;
+
+                            const errorMsg = error instanceof Error ? error.message : String(error);
+
+                            console.log(`[MCP] Returning exception to LLM so it can retry`);
+
+                            // Return exception as content instead of throwing
+                            return [{
+                                type: 'text',
+                                text: `Tool execution failed for '${mcpTool.name}': ${errorMsg}\n\nThis may be a temporary issue. Please try again or use different arguments.`
+                            }];
                         }
                     },
                 });

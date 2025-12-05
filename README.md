@@ -66,6 +66,11 @@ A modular, agentic chatbot platform built with React, Node.js, and the Model Con
 5. Yields text deltas, reasoning, and tool-call events to frontend
 6. Continues loop until LLM completes response
 
+**Error Recovery**: Handling of MCP tool failures:
+- When tools fail with recoverable errors (wrong arguments, validation issues), errors are returned as text observations to the LLM
+- LLM reads the error message, understands the problem, and retries with corrected arguments
+- Hallucination detection prevents infinite loops by tracking identical tool calls
+
 ## Quick Start
 
 ### Prerequisites
@@ -425,8 +430,6 @@ Your role:
         primaryColor: '#8b5cf6',
         name: 'my-activity',
     },
-
-    persistChatHistory: false,
 };
 ```
 
@@ -629,6 +632,22 @@ mcpServers: [
 6. **Idempotent**: Same input should produce same output
 7. **Documentation**: Add tool usage to activity systemPrompt
 
+## MCP Tool Error Recovery
+
+The agent server includes intelligent error recovery for MCP tool failures, allowing the LLM to learn from errors and retry with corrected arguments.
+
+### Configuration
+
+Control error recovery behavior with environment variables:
+
+```env
+# Enable/disable error recovery (default: true)
+ENABLE_TOOL_RETRY=true
+
+# Maximum identical retries before warning (default: 2)
+MAX_TOOL_RETRIES=2
+```
+
 ## Environment Configuration
 
 ### Development (.env)
@@ -654,6 +673,10 @@ PORT=3000
 # Debug Flags (optional, for development)
 DEBUG_PROMPTS=false  # Set to 'true' to log system prompts and template processing
 DEBUG_MCP=false      # Set to 'true' to log MCP tool calls and responses
+
+# MCP Tool Error Recovery
+ENABLE_TOOL_RETRY=true   # Set to 'false' to disable LLM retry on tool errors (default: true)
+MAX_TOOL_RETRIES=2       # Maximum tool call retries before warning (default: 2)
 ```
 
 ### Production (.env)
