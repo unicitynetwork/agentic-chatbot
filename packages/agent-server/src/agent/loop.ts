@@ -117,11 +117,19 @@ function convertToCoreMessages(messages: ChatMessage[]): CoreMessage[] {
 }
 
 /**
- * Truncates messages to stay within a safe character limit (proxy for tokens).
+ * Truncates messages to stay within safe limits (characters and/or message count).
  * Always keeps the last message (current user input).
- * Removes messages from the beginning of the history if limit is exceeded.
+ * Removes messages from the beginning of the history if limits are exceeded.
+ *
+ * @param messages - Array of chat messages
+ * @param maxChars - Maximum character limit (0 = no limit)
+ * @param maxMessages - Maximum message count (0 = no limit, 1 = only latest, etc.)
  */
-function truncateMessages(messages: ChatMessage[], maxChars: number = 30000): ChatMessage[] {
+function truncateMessages(
+    messages: ChatMessage[],
+    maxChars: number = 30000,
+    maxMessages: number = 0
+): ChatMessage[] {
     if (messages.length === 0) return [];
 
     // Always keep the last message
@@ -131,18 +139,38 @@ function truncateMessages(messages: ChatMessage[], maxChars: number = 30000): Ch
     let currentChars = JSON.stringify(lastMessage).length;
     const keptMessages: ChatMessage[] = [lastMessage];
 
-    // Add messages from the end (most recent) to the beginning
-    for (let i = otherMessages.length - 1; i >= 0; i--) {
-        const msg = otherMessages[i];
-        const msgSize = JSON.stringify(msg).length;
-
-        if (currentChars + msgSize > maxChars) {
-            console.log(`[Agent] Truncating history. Reached limit of ${maxChars} chars.`);
-            break;
+    // Apply message count limit first if specified (maxMessages > 0)
+    let candidateMessages = otherMessages;
+    if (maxMessages > 0) {
+        // maxMessages includes the last message, so we can keep maxMessages - 1 others
+        const maxOthers = Math.max(0, maxMessages - 1);
+        if (otherMessages.length > maxOthers) {
+            candidateMessages = otherMessages.slice(-maxOthers); // Keep most recent
+            console.log(`[Agent] Message count limit: keeping ${maxMessages} most recent messages (truncated ${otherMessages.length - maxOthers} older messages)`);
         }
+    }
 
-        currentChars += msgSize;
-        keptMessages.unshift(msg);
+    // Apply character limit if specified (maxChars > 0)
+    if (maxChars > 0) {
+        // Add messages from the end (most recent) to the beginning
+        for (let i = candidateMessages.length - 1; i >= 0; i--) {
+            const msg = candidateMessages[i];
+            const msgSize = JSON.stringify(msg).length;
+
+            if (currentChars + msgSize > maxChars) {
+                console.log(`[Agent] Character limit: reached ${maxChars} chars (truncated ${i + 1} older messages)`);
+                break;
+            }
+
+            currentChars += msgSize;
+            keptMessages.unshift(msg);
+        }
+    } else {
+        // No character limit - add all candidate messages
+        candidateMessages.forEach(msg => {
+            currentChars += JSON.stringify(msg).length;
+            keptMessages.unshift(msg);
+        });
     }
 
     return keptMessages;
@@ -223,7 +251,13 @@ export async function* runAgentStream(ctx: AgentContext) {
 
         const allTools = { ...localTools, ...mcpTools };
 
-        const recentMessages = truncateMessages(messages, 30000); // ~7-8k tokens
+        // Apply activity-specific message history limits
+        const maxBytes = activity.maxHistoryBytes ?? 30000; // Default ~7-8k tokens
+        const maxMessages = activity.maxHistoryMessages ?? 0; // Default no message limit
+
+        console.log(`[Agent] Message history limits: maxBytes=${maxBytes}, maxMessages=${maxMessages}`);
+
+        const recentMessages = truncateMessages(messages, maxBytes, maxMessages);
 
         if (messages.length !== recentMessages.length) {
             console.log(`[Agent] Truncated conversation: ${messages.length} -> ${recentMessages.length} messages`);

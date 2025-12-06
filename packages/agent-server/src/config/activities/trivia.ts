@@ -80,4 +80,7 @@ If trivia_continue says "You have an unanswered question":
     ],
 
     localTools: ['memory'],
+
+    // Keep only 2 most recent messages (current + previous)
+    maxHistoryMessages: 2,
 };

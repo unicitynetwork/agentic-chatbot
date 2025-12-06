@@ -28,6 +28,9 @@ export const ActivityConfigSchema = z.object({
         name: z.string(),
     }).optional(),
     persistChatHistory: z.boolean().default(true).optional(),
+    // Message history limits (0 = no limit)
+    maxHistoryBytes: z.number().default(30000).optional(), // Default ~7-8k tokens
+    maxHistoryMessages: z.number().default(0).optional(), // 0 = no message count limit, 1 = only latest, etc.
 });
 
 export type ActivityConfig = z.infer<typeof ActivityConfigSchema>;
