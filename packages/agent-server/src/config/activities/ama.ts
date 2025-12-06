@@ -45,7 +45,7 @@ Available tools:
     llm: {
         provider: 'openai-compatible',
         model: 'gpt-oss',
-        baseUrl: 'http://194.163.184.11:8000/v1',
+        baseUrl: process.env.AMA_API_URL || 'https://api.openai.com/v1',
         apiKey: process.env.AMA_API_KEY,
         temperature: 1.0,
     },

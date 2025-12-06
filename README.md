@@ -99,10 +99,8 @@ Required environment variables:
 ```env
 # LLM API Keys
 GOOGLE_API_KEY=your_gemini_api_key_here
-AMA_API_KEY=optional_for_ama_activity
-
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/agentic_chatbot
+AMA_API_KEY=for_ama_activity
+AMA_API_URL=base_url_for_ama_activity
 
 # CORS (comma-separated for multiple origins)
 CORS_ORIGIN=http://localhost:5173
@@ -656,9 +654,11 @@ MAX_TOOL_RETRIES=2
 # LLM Configuration
 GOOGLE_API_KEY=your_gemini_api_key
 AMA_API_KEY=optional_openai_compatible_key
+AMA_API_URL=https://api.openai.com/v1
 
-# Database
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agentic_chatbot
+# Frontend/Backend URLs
+VITE_API_URL=http://localhost:3000
+API_BASE_URL=http://localhost:5173
 
 # CORS (comma-separated)
 CORS_ORIGIN=http://localhost:5173
@@ -670,13 +670,13 @@ MCP_WEB_URL=http://localhost:3002/mcp
 # Server Port
 PORT=3000
 
-# Debug Flags (optional, for development)
-DEBUG_PROMPTS=false  # Set to 'true' to log system prompts and template processing
-DEBUG_MCP=false      # Set to 'true' to log MCP tool calls and responses
+# Debug Flags
+DEBUG_PROMPTS=false
+DEBUG_MCP=false
 
-# MCP Tool Error Recovery
-ENABLE_TOOL_RETRY=true   # Set to 'false' to disable LLM retry on tool errors (default: true)
-MAX_TOOL_RETRIES=2       # Maximum tool call retries before warning (default: 2)
+# Tool Error Recovery
+ENABLE_TOOL_RETRY=true
+MAX_TOOL_RETRIES=2
 ```
 
 ### Production (.env)
@@ -685,14 +685,16 @@ MAX_TOOL_RETRIES=2       # Maximum tool call retries before warning (default: 2)
 # LLM Configuration
 GOOGLE_API_KEY=your_production_api_key
 AMA_API_KEY=your_production_api_key
+AMA_API_URL=https://api.openai.com/v1
 
-# Database (use managed PostgreSQL)
-DATABASE_URL=postgresql://user:pass@production-host:5432/dbname?sslmode=require
+# Frontend/Backend URLs
+VITE_API_URL=https://api.yourdomain.com
+API_BASE_URL=https://yourdomain.com
 
-# CORS - IMPORTANT: List all allowed origins
+# CORS
 CORS_ORIGIN=https://yourdomain.com,https://www.yourdomain.com
 
-# MCP Server URLs (internal Docker network names)
+# MCP Server URLs
 MCP_TRIVIA_URL=http://mcp-trivia:3001/mcp
 MCP_WEB_URL=http://mcp-web:3002/mcp
 
@@ -819,22 +821,6 @@ pnpm install
 docker-compose build
 ```
 
-### Database Connection Issues
-
-**Error**: "relation does not exist"
-
-**Solution**: Run migrations:
-```bash
-docker-compose exec agent-server pnpm db:migrate
-```
-
-**Error**: "password authentication failed"
-
-**Solution**: Check DATABASE_URL format:
-```env
-postgresql://user:password@host:port/database
-```
-
 ### Streaming Not Working
 
 **Error**: Chat messages not streaming
@@ -861,7 +847,7 @@ import { generateUUID } from '../utils/uuid';
 **Error**: Memory tool returns empty results
 
 **Solution**:
-1. Check database connection
+1. Check browser's localStorage permissions
 2. Verify migrations ran: `docker-compose exec agent-server pnpm db:migrate`
 3. Check userId is being passed correctly (see Mock Wallet component)
 
@@ -877,7 +863,6 @@ import { generateUUID } from '../utils/uuid';
 
 **Solution**:
 - Use a lighter model (e.g., gemini-2.5-flash instead of pro)
-- Implement request throttling
 - Upgrade API tier
 
 ## Additional Resources
@@ -885,4 +870,3 @@ import { generateUUID } from '../utils/uuid';
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
 - [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs)
 - [Hono Documentation](https://hono.dev/)
-- [Drizzle ORM Documentation](https://orm.drizzle.team/)
