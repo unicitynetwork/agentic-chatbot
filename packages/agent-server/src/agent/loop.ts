@@ -24,9 +24,15 @@ export interface AgentContext {
 function getUserFriendlyError(error: unknown): string {
     const errorStr = error instanceof Error ? error.message : String(error);
 
-    // API errors
-    if (errorStr.includes('API key') || errorStr.includes('GOOGLE_API_KEY')) {
-        return '_Sorry, there\'s a configuration issue. Please contact support._';
+    // API key errors (catch various forms to prevent leaking keys)
+    if (errorStr.includes('API key') ||
+        errorStr.includes('GOOGLE_API_KEY') ||
+        errorStr.includes('Incorrect API key') ||
+        errorStr.includes('invalid_api_key') ||
+        errorStr.includes('Invalid authentication') ||
+        errorStr.includes('401') ||
+        errorStr.includes('Unauthorized')) {
+        return '_Sorry, there\'s an API configuration issue. Please contact support._';
     }
 
     // Rate limiting and quota errors
@@ -434,25 +440,38 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
                     yield { type: 'reasoning', text: part.textDelta };
                 } else if (part.type === 'error') {
                     console.error('[Agent] Stream error:', part.error);
-                    const errorMsg = part.error instanceof Error ? part.error.message : String(part.error);
-                    const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
-
-                    // Return detailed error as italic text
+                    const requestIdSuffix = ctx.requestId ? ` Request ID: ${ctx.requestId}` : '';
+                    const userFriendlyMsg = getUserFriendlyError(part.error);
                     yield {
                         type: 'text-delta',
-                        text: `\n\n_Error: ${errorMsg}${requestIdSuffix}_\n\n`
+                        text: `\n\n${userFriendlyMsg}${requestIdSuffix ? ` (${requestIdSuffix})` : ''}\n\n`
                     };
                 } else if (part.type === 'finish') {
                     console.log('[Agent] Stream finished. Finish reason:', part.finishReason);
                     console.log('[Agent] Total text generated:', totalTextLength, 'characters');
                     console.log('[Agent] Had content:', hasContent);
-
-                    // Log additional finish metadata for troubleshooting
                     console.log('[Agent] Finish metadata:', {
                         finishReason: part.finishReason,
                         usage: part.usage,
                         experimental_providerMetadata: part.experimental_providerMetadata,
                     });
+
+                    // Log detailed error info if finish reason is error
+                    if (part.finishReason === 'error') {
+                        console.error('[Agent] ❌ Stream finished with error');
+                        console.error('[Agent] Full part object:', JSON.stringify(part, null, 2));
+                        console.error('[Agent] Provider metadata:', part.experimental_providerMetadata);
+
+                        // Check for response in part object
+                        if ((part as any).response) {
+                            console.error('[Agent] Response object:', JSON.stringify((part as any).response, null, 2));
+                        }
+
+                        // Check for error field
+                        if ((part as any).error) {
+                            console.error('[Agent] Error field:', (part as any).error);
+                        }
+                    }
 
                     // Log if we got no content
                     if (!hasContent || totalTextLength === 0) {
@@ -473,9 +492,9 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
             if (streamError instanceof Error && streamError.stack) {
                 console.error('[Agent] Stack trace:', streamError.stack);
             }
-            const errorMsg = streamError instanceof Error ? streamError.message : String(streamError);
-            const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
-            yield { type: 'text-delta', text: `\n\n_Stream error: ${errorMsg}${requestIdSuffix}_\n\n` };
+            const requestIdSuffix = ctx.requestId ? ` Request ID: ${ctx.requestId}` : '';
+            const userFriendlyMsg = getUserFriendlyError(streamError);
+            yield { type: 'text-delta', text: `\n\n${userFriendlyMsg}${requestIdSuffix ? ` (${requestIdSuffix})` : ''}\n\n` };
         }
 
         console.log('[Agent] Stream complete. Total characters:', charCount);
@@ -497,9 +516,9 @@ IMPORTANT INSTRUCTIONS FOR MESSAGE HANDLING:
         if (error instanceof Error && error.stack) {
             console.error('[Agent] Stack trace:', error.stack);
         }
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        const requestIdSuffix = ctx.requestId ? ` (Request ID: ${ctx.requestId})` : '';
-        yield { type: 'text-delta', text: `\n\n_Error: ${errorMsg}${requestIdSuffix}_\n\n` };
+        const requestIdSuffix = ctx.requestId ? ` Request ID: ${ctx.requestId}` : '';
+        const userFriendlyMsg = getUserFriendlyError(error);
+        yield { type: 'text-delta', text: `\n\n${userFriendlyMsg}${requestIdSuffix ? ` (${requestIdSuffix})` : ''}\n\n` };
         yield { type: 'done' };
     }
 }
