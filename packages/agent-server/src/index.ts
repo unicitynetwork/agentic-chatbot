@@ -59,9 +59,12 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 const port = parseInt(process.env.PORT || '3000');
 
-serve({
+const server = serve({
     fetch: app.fetch,
     port,
 });
+
+// Increase timeout to 5 minutes to allow for slow LLM responses
+server.setTimeout(300000);
 
 console.log(`Agent server running on http://localhost:${port}`);

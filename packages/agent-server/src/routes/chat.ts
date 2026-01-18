@@ -31,8 +31,8 @@ chatRouter.post('/stream', async (c) => {
 
     // Extract user IP for geolocation-based features
     const userIp = c.req.header('x-forwarded-for')?.split(',')[0].trim()
-                 || c.req.header('x-real-ip')
-                 || 'unknown';
+        || c.req.header('x-real-ip')
+        || 'unknown';
 
     // TODO: Add IP-to-country lookup service if needed
     // For now, we can use a simple service or leave country detection to client
@@ -56,12 +56,29 @@ chatRouter.post('/stream', async (c) => {
             });
 
             let eventCount = 0;
-            for await (const event of agentStream) {
-                eventCount++;
-                await stream.writeSSE({
-                    event: event.type,
-                    data: JSON.stringify(event),
-                });
+            // Start keep-alive interval to prevent timeout
+            const keepAliveInterval = setInterval(async () => {
+                try {
+                    await stream.writeSSE({
+                        event: 'ping',
+                        data: JSON.stringify({ type: 'ping' }),
+                    });
+                } catch (e) {
+                    // Ignore errors during keep-alive (stream might be closed)
+                    clearInterval(keepAliveInterval);
+                }
+            }, 30000); // 30 seconds
+
+            try {
+                for await (const event of agentStream) {
+                    eventCount++;
+                    await stream.writeSSE({
+                        event: event.type,
+                        data: JSON.stringify(event),
+                    });
+                }
+            } finally {
+                clearInterval(keepAliveInterval);
             }
 
             console.log(`[Request ${requestId}] Stream completed successfully. Total events: ${eventCount}`);
