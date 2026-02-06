@@ -13,7 +13,6 @@ COPY packages/agent-server ./packages/agent-server
 
 RUN pnpm --filter @agentic/shared build
 RUN pnpm --filter @agentic/agent-server build
-RUN pnpm --filter @agentic/agent-server db:generate
 
 FROM node:20-alpine
 WORKDIR /app

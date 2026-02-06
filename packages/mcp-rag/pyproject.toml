@@ -1,0 +1,19 @@
+[project]
+name = "mcp-rag"
+version = "1.0.0"
+description = "MCP server for RAG-based Unicity knowledge base search"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=0.5.0",
+    "pydantic>=2.0.0",
+    "starlette>=0.36.0",
+    "uvicorn>=0.27.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+mcp-rag = "src.server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

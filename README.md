@@ -78,7 +78,6 @@ A modular, agentic chatbot platform built with React, Node.js, and the Model Con
 - Node.js 20+
 - pnpm 8+
 - Docker & Docker Compose
-- PostgreSQL (or use Docker)
 
 ### Local Development
 
@@ -121,15 +120,6 @@ Services will be available at:
 - Trivia MCP: http://localhost:3001
 - Web MCP: http://localhost:3002
 
-### Without Docker
-
-1. **Start the database** (PostgreSQL)
-
-2. **Run migrations**:
-```bash
-cd packages/agent-server
-pnpm db:migrate
-```
 
 3. **Start services** (in separate terminals):
 ```bash
@@ -755,27 +745,6 @@ docker-compose up -d
 ```bash
 docker-compose logs -f
 ```
-
-5. **Run database migrations** (first time only):
-```bash
-docker-compose exec agent-server pnpm db:migrate
-```
-
-#### 8. Monitoring and Logging 📊
-
-**Production monitoring essentials**:
-- Set up log aggregation (ELK stack, Loki, CloudWatch)
-- Monitor error rates and latency
-- Set up alerts for suspicious activity
-- Track API usage and costs
-- Monitor database performance
-
-**Sensitive data in logs**:
-- Never log API keys or passwords
-- Redact user PII before logging
-- Rotate logs regularly
-- Secure log storage
-
 
 ## Troubleshooting
 

@@ -34,6 +34,21 @@ services:
       PORT: 3002
     restart: unless-stopped
 
+  mcp-rag:
+    build:
+      context: ./packages/mcp-rag
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      DATA_DIR: /data/docs
+      DB_DIR: /data/chromadb
+    volumes:
+      - ./rag:/data/docs:ro
+      - rag-chromadb:/data/chromadb
+    restart: unless-stopped
+
   agent-server:
     build:
       context: .
@@ -48,6 +63,7 @@ services:
       API_BASE_URL: ${API_BASE_URL}
       MCP_TRIVIA_URL: http://mcp-trivia:3001/mcp
       MCP_WEB_URL: http://mcp-web:3002/mcp
+      MCP_RAG_URL: http://mcp-rag:3003/mcp
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
       DEBUG_PROMPTS: ${DEBUG_PROMPTS:-false}
       DEBUG_MCP: ${DEBUG_MCP:-false}
@@ -59,18 +75,21 @@ services:
         condition: service_started
       mcp-web:
         condition: service_started
+      mcp-rag:
+        condition: service_started
     restart: unless-stopped
 
-  #ui:
-  #  build:
-  #    context: .
-  #    dockerfile: packages/ui/Dockerfile
-  #    args:
-  #      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
-  #      VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
-  #  ports:
-  #    - "5173:80"
-  #  restart: unless-stopped
+  # ui:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/ui/Dockerfile
+  #     args:
+  #       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+  #       VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+  #   ports:
+  #     - "5173:80"
+  #   restart: unless-stopped
 
 volumes:
   trivia-data:
+  rag-chromadb:
